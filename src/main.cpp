@@ -8,16 +8,15 @@
 #include <vector>
 #include <cstdio>
 
+// TODO
+// ensure multiple devices can connect.
+// wait until the intended number of devices are connected before proceeding.
+// proceed to be a peripheral for xLights (somehow).
+
 //////////////////////////////////////////////////////
 // CONFIGURATION
 //////////////////////////////////////////////////////
 
-// IP Address of your MQTT Broker (probably your Home Assistant host)
-#define MQTT_BROKER_ADDR IPAddress(10, 0, 1, 2)
-// Your WiFi SSID
-#define WIFI_SSID "NORSEIOT2G"
-// Your Wifi Password
-#define WIFI_PASS ""
 // UUID 1 128-Bit (may use linux tool uuidgen or random numbers via https://www.uuidgenerator.net/)
 #define BEACON_UUID "a1885535-7e56-4c9c-ae19-796ce9864f3f"
 //////////////////////////////////////////////////////
@@ -26,9 +25,6 @@
 
 uint8_t my_key[4];
 byte mac[6];
-WiFiClient client;
-HADevice device;
-HAMqtt *mqtt;
 BLEAdvertising *pAdvertising;
 const uint8_t default_key[] = {0x5e, 0x36, 0x7b, 0xc4};
 struct LightType
@@ -41,20 +37,17 @@ std::vector<LightType> lightTypes = {
     {"RGBW", {0xa1, 0xa8}},  // 43169 - A8A1 - RGBW light
     {"RGB", {0xa0, 0xa8}},   // 43168 - A8A0 - RGB light
 };
-#define BLESCAN_DURATION 5
+#define BLESCAN_DURATION 10
 struct LightDevice
 {
   BLEAdvertisedDevice device;
   uint8_t type[2];
   bool isRegistered = false;
   std::string id;
-  HALight *light;
   std::string name;
   uint8_t number;
 };
 std::vector<LightDevice> myLights;
-#define BUFFER_SIZE 200
-char str_buffer[BUFFER_SIZE];
 BLEScan *pBLEScan;
 const int ledPin = 2;
 
@@ -352,88 +345,9 @@ void single_control(const uint8_t *key, const uint8_t *data)
   Serial.println("");
 }
 
-LightDevice getLight(std::string id)
+std::string getMacAddress(BLEAdvertisedDevice device)
 {
-  for (int i = 0; i < myLights.size(); i++)
-  {
-    if (myLights[i].id == id)
-      return myLights[i];
-  }
-  throw std::runtime_error("Light not found");
-}
-
-void onStateCommand(bool state, HALight *sender)
-{
-  Serial.print("Light: ");
-  Serial.println(sender->getName());
-  Serial.print("ID: ");
-  Serial.println(sender->uniqueId());
-  Serial.print("State: ");
-  Serial.println(state);
-  LightDevice light = getLight(sender->uniqueId());
-  uint8_t data[] = {0x22, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-  data[1] = light.number;
-  if (state)
-    data[2] = 0x80;
-  single_control(my_key, data);
-  sender->setState(state); // report state back to the Home Assistant
-}
-
-void onBrightnessCommand(uint8_t brightness, HALight *sender)
-{
-  Serial.print("Light: ");
-  Serial.println(sender->getName());
-  Serial.print("ID: ");
-  Serial.println(sender->uniqueId());
-  Serial.print("Brightness: ");
-  Serial.println(brightness);
-  LightDevice light = getLight(sender->uniqueId());
-  uint8_t data[] = {0x22, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00};
-  data[1] = light.number;
-  data[2] = brightness & 127;
-  single_control(my_key, data);
-  sender->setBrightness(brightness); // report brightness back to the Home Assistant
-}
-
-void onColorTemperatureCommand(uint16_t temperature, HALight *sender)
-{
-  Serial.print("Light: ");
-  Serial.println(sender->getName());
-  Serial.print("ID: ");
-  Serial.println(sender->uniqueId());
-  Serial.print("Color temperature: ");
-  Serial.println(temperature);
-  LightDevice light = getLight(sender->uniqueId());
-  uint8_t data[] = {0x72, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00};
-  data[1] = light.number;
-  data[2] = sender->getCurrentBrightness() & 127;
-  data[6] = temperature & 127;
-  data[7] = (temperature >> 8) & 127;
-  single_control(my_key, data);
-  sender->setColorTemperature(temperature); // report color temperature back to the Home Assistant
-}
-
-void onRGBColorCommand(HALight::RGBColor color, HALight *sender)
-{
-  Serial.print("Light: ");
-  Serial.println(sender->getName());
-  Serial.print("ID: ");
-  Serial.println(sender->uniqueId());
-  Serial.print("Red: ");
-  Serial.println(color.red);
-  Serial.print("Green: ");
-  Serial.println(color.green);
-  Serial.print("Blue: ");
-  Serial.println(color.blue);
-  LightDevice light = getLight(sender->uniqueId());
-  uint8_t data[] = {0x72, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00};
-  data[1] = light.number;
-  data[2] = sender->getCurrentBrightness() & 127;
-  data[3] = color.blue;
-  data[4] = color.red;
-  data[5] = color.green;
-  single_control(my_key, data);
-  sender->setRGBColor(color); // report color back to the Home Assistant
+  return device.getManufacturerData().substr(6, 6);
 }
 
 class AddDeviceCallback : public BLEAdvertisedDeviceCallbacks
@@ -474,8 +388,11 @@ class AddDeviceCallback : public BLEAdvertisedDeviceCallbacks
         bool alreadyKnown = false;
         for (int i = 0; i < myLights.size(); i++)
         {
-          if (myLights[i].device.getAddress().toString() == foundDevice.getAddress().toString())
+          auto lightMac = getMacAddress(foundDevice);
+          // if (myLights[i].device.getAddress().toString() == foundDevice.getAddress().toString())
+          if (lightMac != "" && lightMac == getMacAddress(myLights[i].device))
           {
+            Serial.print(", IGNORED IT!");
             // we already know about this device, so ignore it
             alreadyKnown = true;
             break;
@@ -559,40 +476,6 @@ class AddLightCallback : public BLEAdvertisedDeviceCallbacks
                   break;
                 }
               }
-              // create the HA object
-              if (typeName == "RGBW")
-              {
-                HALight *light = new HALight(myLights[i].id.c_str(), HALight::BrightnessFeature | HALight::ColorTemperatureFeature | HALight::RGBFeature);
-                light->setName(myLights[i].name.c_str());
-                light->onStateCommand(onStateCommand);
-                light->onBrightnessCommand(onBrightnessCommand);
-                light->onColorTemperatureCommand(onColorTemperatureCommand);
-                light->onRGBColorCommand(onRGBColorCommand);
-                light->setBrightnessScale(127);
-                light->setBrightness(127);
-                myLights[i].light = light;
-              }
-              else if (typeName == "RGB")
-              {
-                HALight *light = new HALight(myLights[i].id.c_str(), HALight::BrightnessFeature | HALight::RGBFeature);
-                light->setName(myLights[i].name.c_str());
-                light->onStateCommand(onStateCommand);
-                light->onBrightnessCommand(onBrightnessCommand);
-                light->onRGBColorCommand(onRGBColorCommand);
-                light->setBrightnessScale(127);
-                light->setBrightness(127);
-                myLights[i].light = light;
-              }
-              else
-              {
-                // "Smart" - no additional features
-                HALight *light = new HALight(myLights[i].id.c_str());
-                light->setName(myLights[i].name.c_str());
-                light->onStateCommand(onStateCommand);
-                myLights[i].light = light;
-              }
-              Serial.printf(", created light ");
-              Serial.printf(myLights[i].light->uniqueId());
             }
             Serial.println("");
           }
@@ -688,59 +571,42 @@ void setup()
   my_key[1] = (new_key >> 8) & 0xFF;
   my_key[2] = (new_key >> 16) & 0xFF;
   my_key[3] = (new_key >> 24) & 0xFF;
-  WiFi.macAddress(mac);
-  device.setUniqueId(mac, sizeof(mac));
-  device.setName("BRMesh");
-  device.setManufacturer("BRMesh");
-  device.setModel("BRMesh");
-  mqtt = new HAMqtt(client, device);
+
   Serial.printf("ESP32 MAC: %02X:%02X:%02X:%02X:%02X:%02X\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
   // Create the BLE Device
   BLEDevice::init("ESP32 as iBeacon");
   pAdvertising = BLEDevice::getAdvertising();
   BLEDevice::startAdvertising();
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    delay(500); // waiting for the connection
-    Serial.println("Connecting to WiFi...");
-  }
   // add the lights
   addLights();
   // print the added lights with their IDs
+  Serial.println("added lights on setup:");
   for (int i = 0; i < myLights.size(); i++)
   {
     if (myLights[i].isRegistered)
     {
-      Serial.printf("Light %d - ", myLights[i].number);
-      Serial.println(myLights[i].light->uniqueId());
+      Serial.printf("Light %d\n", myLights[i].number);
     }
   }
   randomSeed(analogRead(0)); // set random seed
   // finished adding lights
   digitalWrite(ledPin, LOW);
-  Serial.println("Starting MQTT");
-  mqtt->begin(MQTT_BROKER_ADDR, 1883);
-  mqtt->publish("lights-status", "ESP32 Joined");
-}
-
-HALight::RGBColor getRandomColor()
-{
-  return {random(255), random(255), random(255)};
 }
 
 void loop()
 {
-  auto color = getRandomColor();
+  Serial.printf("There are %d lights connected.\n", myLights.size());
+  static bool state = true;
   for (auto light : myLights)
   {
     uint8_t data[] = {0x72, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00};
     data[1] = light.number;
-    data[2] = 127;
-    data[3] = color.blue;
-    data[4] = color.red;
-    data[5] = color.green;
+    data[2] = state ? 255 : 0;
+    data[3] = 0;   // blue
+    data[4] = 0;   // red
+    data[5] = 255; // green
     single_control(my_key, data);
   }
+  state = !state;
   delay(3000);
 }
