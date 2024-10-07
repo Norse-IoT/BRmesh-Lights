@@ -9,8 +9,8 @@
 #include <cstdio>
 
 // TODO
-// remove mqtt.
 // remove wifi.
+// remove home assistant.
 // ensure multiple devices can connect.
 // wait until the intended number of devices are connected before proceeding.
 // proceed to be a peripheral for xLights (somehow).
@@ -52,7 +52,6 @@ struct LightDevice
   uint8_t type[2];
   bool isRegistered = false;
   std::string id;
-  HALight *light;
   std::string name;
   uint8_t number;
 };
@@ -571,40 +570,6 @@ class AddLightCallback : public BLEAdvertisedDeviceCallbacks
                   break;
                 }
               }
-              // create the HA object
-              if (typeName == "RGBW")
-              {
-                HALight *light = new HALight(myLights[i].id.c_str(), HALight::BrightnessFeature | HALight::ColorTemperatureFeature | HALight::RGBFeature);
-                light->setName(myLights[i].name.c_str());
-                light->onStateCommand(onStateCommand);
-                light->onBrightnessCommand(onBrightnessCommand);
-                light->onColorTemperatureCommand(onColorTemperatureCommand);
-                light->onRGBColorCommand(onRGBColorCommand);
-                light->setBrightnessScale(127);
-                light->setBrightness(127);
-                myLights[i].light = light;
-              }
-              else if (typeName == "RGB")
-              {
-                HALight *light = new HALight(myLights[i].id.c_str(), HALight::BrightnessFeature | HALight::RGBFeature);
-                light->setName(myLights[i].name.c_str());
-                light->onStateCommand(onStateCommand);
-                light->onBrightnessCommand(onBrightnessCommand);
-                light->onRGBColorCommand(onRGBColorCommand);
-                light->setBrightnessScale(127);
-                light->setBrightness(127);
-                myLights[i].light = light;
-              }
-              else
-              {
-                // "Smart" - no additional features
-                HALight *light = new HALight(myLights[i].id.c_str());
-                light->setName(myLights[i].name.c_str());
-                light->onStateCommand(onStateCommand);
-                myLights[i].light = light;
-              }
-              Serial.printf(", created light ");
-              Serial.printf(myLights[i].light->uniqueId());
             }
             Serial.println("");
           }
@@ -711,6 +676,7 @@ void setup()
   pAdvertising = BLEDevice::getAdvertising();
   BLEDevice::startAdvertising();
   WiFi.begin(WIFI_SSID, WIFI_PASS);
+  // TODO: delete
   while (WiFi.status() != WL_CONNECTED)
   {
     delay(500); // waiting for the connection
@@ -719,12 +685,12 @@ void setup()
   // add the lights
   addLights();
   // print the added lights with their IDs
+  Serial.println("added lights on setup:");
   for (int i = 0; i < myLights.size(); i++)
   {
     if (myLights[i].isRegistered)
     {
-      Serial.printf("Light %d - ", myLights[i].number);
-      Serial.println(myLights[i].light->uniqueId());
+      Serial.printf("Light %d\n", myLights[i].number);
     }
   }
   randomSeed(analogRead(0)); // set random seed
