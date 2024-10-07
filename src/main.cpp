@@ -8,12 +8,17 @@
 #include <vector>
 #include <cstdio>
 
+// TODO
+// remove mqtt.
+// remove wifi.
+// ensure multiple devices can connect.
+// wait until the intended number of devices are connected before proceeding.
+// proceed to be a peripheral for xLights (somehow).
+
 //////////////////////////////////////////////////////
 // CONFIGURATION
 //////////////////////////////////////////////////////
 
-// IP Address of your MQTT Broker (probably your Home Assistant host)
-#define MQTT_BROKER_ADDR IPAddress(10, 0, 1, 2)
 // Your WiFi SSID
 #define WIFI_SSID "NORSEIOT2G"
 // Your Wifi Password
@@ -28,7 +33,6 @@ uint8_t my_key[4];
 byte mac[6];
 WiFiClient client;
 HADevice device;
-HAMqtt *mqtt;
 BLEAdvertising *pAdvertising;
 const uint8_t default_key[] = {0x5e, 0x36, 0x7b, 0xc4};
 struct LightType
@@ -436,6 +440,11 @@ void onRGBColorCommand(HALight::RGBColor color, HALight *sender)
   sender->setRGBColor(color); // report color back to the Home Assistant
 }
 
+std::string getMacAddress(BLEAdvertisedDevice device)
+{
+  return device.getManufacturerData().substr(6, 6);
+}
+
 class AddDeviceCallback : public BLEAdvertisedDeviceCallbacks
 {
   void onResult(BLEAdvertisedDevice foundDevice)
@@ -474,8 +483,11 @@ class AddDeviceCallback : public BLEAdvertisedDeviceCallbacks
         bool alreadyKnown = false;
         for (int i = 0; i < myLights.size(); i++)
         {
-          if (myLights[i].device.getAddress().toString() == foundDevice.getAddress().toString())
+          auto lightMac = getMacAddress(foundDevice);
+          // if (myLights[i].device.getAddress().toString() == foundDevice.getAddress().toString())
+          if (lightMac != "" && lightMac == getMacAddress(myLights[i].device))
           {
+            Serial.print(", IGNORED IT!");
             // we already know about this device, so ignore it
             alreadyKnown = true;
             break;
@@ -693,7 +705,6 @@ void setup()
   device.setName("BRMesh");
   device.setManufacturer("BRMesh");
   device.setModel("BRMesh");
-  mqtt = new HAMqtt(client, device);
   Serial.printf("ESP32 MAC: %02X:%02X:%02X:%02X:%02X:%02X\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
   // Create the BLE Device
   BLEDevice::init("ESP32 as iBeacon");
@@ -719,13 +730,11 @@ void setup()
   randomSeed(analogRead(0)); // set random seed
   // finished adding lights
   digitalWrite(ledPin, LOW);
-  Serial.println("Starting MQTT");
-  mqtt->begin(MQTT_BROKER_ADDR, 1883);
-  mqtt->publish("lights-status", "ESP32 Joined");
 }
 
 void loop()
 {
+  Serial.printf("There are %d lights connected.", myLights.size());
   static bool state = true;
   for (auto light : myLights)
   {
