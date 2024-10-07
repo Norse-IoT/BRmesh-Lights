@@ -724,23 +724,19 @@ void setup()
   mqtt->publish("lights-status", "ESP32 Joined");
 }
 
-HALight::RGBColor getRandomColor()
-{
-  return {random(255), random(255), random(255)};
-}
-
 void loop()
 {
-  auto color = getRandomColor();
+  static bool state = true;
   for (auto light : myLights)
   {
     uint8_t data[] = {0x72, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00};
     data[1] = light.number;
-    data[2] = 127;
-    data[3] = color.blue;
-    data[4] = color.red;
-    data[5] = color.green;
+    data[2] = state ? 255 : 0;
+    data[3] = 0;   // blue
+    data[4] = 0;   // red
+    data[5] = 255; // green
     single_control(my_key, data);
   }
+  state = !state;
   delay(3000);
 }
